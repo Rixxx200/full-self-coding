@@ -7,6 +7,10 @@ YELLOW='\033[0;33m'
 NC='\033[0m'
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+case "$GIT_DIR" in /*|[a-zA-Z]:*) ;; *) GIT_DIR="$REPO_ROOT/$GIT_DIR" ;; esac
+HOOK_DIR=$(cd "$(dirname "$0")" && pwd)
+AI_CR_ROOT=$(cd "$HOOK_DIR/.." && pwd)
 
 # AI 审查请求超时（秒）、用户确认等待时间（秒），可通过环境变量覆盖
 CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
@@ -80,10 +84,11 @@ if [ -z "$FEEDBACK" ]; then
     exit 0
 fi
 
-if [ -n "$RECORD_ID" ]; then
-    echo "$RECORD_ID" > "$REPO_ROOT/.git/ai-cr-record-id"
+if [ -n "$RECORD_ID" ] && [ -n "$GIT_DIR" ]; then
+    printf '%s' "$RECORD_ID" > "$GIT_DIR/ai-cr-record-id"
+    printf '%s' "$AI_CR_ROOT" > "$GIT_DIR/ai-cr-root"
     echo "[Code Review] Saved to database (record id=${RECORD_ID})"
-    echo "[Code Review] Commit message will be saved after you enter it."
+    echo "[Code Review] commit_message will be saved when commit finishes (e.g. -m \"hwtest\")."
 fi
 
 echo ""
