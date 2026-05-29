@@ -7,10 +7,6 @@ YELLOW='\033[0;33m'
 NC='\033[0m'
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
-case "$GIT_DIR" in /*|[a-zA-Z]:*) ;; *) GIT_DIR="$REPO_ROOT/$GIT_DIR" ;; esac
-HOOK_DIR=$(cd "$(dirname "$0")" && pwd)
-AI_CR_ROOT=$(cd "$HOOK_DIR/.." && pwd)
 
 # AI 审查请求超时（秒）、用户确认等待时间（秒），可通过环境变量覆盖
 CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
@@ -30,9 +26,6 @@ AUTHOR_NAME=$(git config user.name 2>/dev/null)
 AUTHOR_EMAIL=$(git config user.email 2>/dev/null)
 REVIEW_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date +"%Y-%m-%dT%H:%M:%SZ")
 
-# pre-commit 执行时用户尚未输入/确认 commit message，此处留空；
-# 最终说明由 commit-msg / post-commit 钩子回写数据库。
-COMMIT_MESSAGE=""
 COMMIT_TYPE="feat"
 
 LINES_ADDED=0
@@ -61,7 +54,6 @@ FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST http://127.
     -H "X-Lines-Added: ${LINES_ADDED}" \
     -H "X-Lines-Deleted: ${LINES_DELETED}" \
     -H "X-Files-Changed: ${FILES_CHANGED}" \
-    -H "X-Commit-Message: ${COMMIT_MESSAGE}" \
     -H "X-Commit-Type: ${COMMIT_TYPE}" \
     --data-binary "$STAGED_DIFF" 2>&1)
 CURL_EXIT=$?
@@ -84,11 +76,8 @@ if [ -z "$FEEDBACK" ]; then
     exit 0
 fi
 
-if [ -n "$RECORD_ID" ] && [ -n "$GIT_DIR" ]; then
-    printf '%s' "$RECORD_ID" > "$GIT_DIR/ai-cr-record-id"
-    printf '%s' "$AI_CR_ROOT" > "$GIT_DIR/ai-cr-root"
+if [ -n "$RECORD_ID" ]; then
     echo "[Code Review] Saved to database (record id=${RECORD_ID})"
-    echo "[Code Review] commit_message will be saved when commit finishes (e.g. -m \"hwtest\")."
 fi
 
 echo ""
