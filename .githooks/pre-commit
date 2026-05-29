@@ -1,0 +1,130 @@
+#!/bin/sh
+# pre-commit - 使用本地 Flask 服务进行 AI 代码审查，审查时写入数据库
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+
+# AI 审查请求超时（秒）、用户确认等待时间（秒），可通过环境变量覆盖
+CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
+PROMPT_TIMEOUT="${CODE_REVIEW_PROMPT_TIMEOUT:-300}"
+
+echo ""
+echo "[Code Review] Sending diff to local review service..."
+
+STAGED_DIFF=$(git diff --cached -- . ':(exclude)*.lock' ':(exclude)package*.json')
+if [ -z "$STAGED_DIFF" ]; then
+    echo "[Code Review] No staged changes, skipping."
+    exit 0
+fi
+
+# 收集元数据（由 flask_check /review 写入数据库）
+AUTHOR_NAME=$(git config user.name 2>/dev/null)
+AUTHOR_EMAIL=$(git config user.email 2>/dev/null)
+REVIEW_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date +"%Y-%m-%dT%H:%M:%SZ")
+
+# pre-commit 执行时用户尚未输入/确认 commit message，此处留空；
+# 最终说明由 commit-msg / post-commit 钩子回写数据库。
+COMMIT_MESSAGE=""
+COMMIT_TYPE="feat"
+
+LINES_ADDED=0
+LINES_DELETED=0
+FILES_CHANGED=0
+STAT_FILE=$(mktemp 2>/dev/null || echo "/tmp/ai_cr_stat_$$")
+git diff --cached --numstat -- . ':(exclude)*.lock' ':(exclude)package*.json' > "$STAT_FILE"
+while read -r ADD DEL FILE; do
+    [ -z "$ADD" ] && continue
+    FILES_CHANGED=$((FILES_CHANGED + 1))
+    if [ "$ADD" != "-" ]; then LINES_ADDED=$((LINES_ADDED + ADD)); fi
+    if [ "$DEL" != "-" ]; then LINES_DELETED=$((LINES_DELETED + DEL)); fi
+done < "$STAT_FILE"
+rm -f "$STAT_FILE"
+
+echo "[Code Review] Author: ${AUTHOR_NAME} <${AUTHOR_EMAIL}>"
+echo "[Code Review] Changes: +${LINES_ADDED} -${LINES_DELETED} (${FILES_CHANGED} file(s))"
+
+# 调用 /review：携带元数据 Header，Flask 审查后自动入库
+HDR_FILE=$(mktemp 2>/dev/null || echo "/tmp/ai_cr_hdr_$$")
+FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST http://127.0.0.1:8787/review \
+    -H "Content-Type: text/plain" \
+    -H "X-Author-Name: ${AUTHOR_NAME}" \
+    -H "X-Author-Email: ${AUTHOR_EMAIL}" \
+    -H "X-Review-Time: ${REVIEW_TIME}" \
+    -H "X-Lines-Added: ${LINES_ADDED}" \
+    -H "X-Lines-Deleted: ${LINES_DELETED}" \
+    -H "X-Files-Changed: ${FILES_CHANGED}" \
+    -H "X-Commit-Message: ${COMMIT_MESSAGE}" \
+    -H "X-Commit-Type: ${COMMIT_TYPE}" \
+    --data-binary "$STAGED_DIFF" 2>&1)
+CURL_EXIT=$?
+
+RECORD_ID=""
+if [ -f "$HDR_FILE" ]; then
+    RECORD_ID=$(grep -i '^X-Record-Id:' "$HDR_FILE" | head -1 | sed 's/[^:]*:[[:space:]]*//' | tr -d '\r\n')
+    rm -f "$HDR_FILE"
+fi
+
+if [ $CURL_EXIT -ne 0 ]; then
+    echo "[Code Review] Error calling local service (curl exit code: $CURL_EXIT)."
+    echo "Make sure the service is running at http://127.0.0.1:8787/review"
+    echo "Continuing commit without review."
+    exit 0
+fi
+
+if [ -z "$FEEDBACK" ]; then
+    echo "[Code Review] Service returned empty response. Continuing commit."
+    exit 0
+fi
+
+if [ -n "$RECORD_ID" ]; then
+    echo "$RECORD_ID" > "$REPO_ROOT/.git/ai-cr-record-id"
+    echo "[Code Review] Saved to database (record id=${RECORD_ID})"
+    echo "[Code Review] Commit message will be saved after you enter it."
+fi
+
+echo ""
+echo "------------------- Code Review Report -------------------"
+echo "$FEEDBACK"
+echo "----------------------------------------------------------"
+echo ""
+
+printf '%b\n' "${YELLOW}Do you want to continue with this commit? (y/N)${NC}"
+printf '[Code Review] Please respond within %s seconds.\n' "$PROMPT_TIMEOUT"
+
+ANSWER=""
+READ_OK=0
+
+# 优先从 /dev/tty 读取（Cursor/VS Code、Git GUI 下 stdin 常非终端）
+if [ -e /dev/tty ]; then
+    if read -r -t "$PROMPT_TIMEOUT" ANSWER < /dev/tty 2>/dev/null; then
+        READ_OK=1
+    elif read -r ANSWER < /dev/tty 2>/dev/null; then
+        READ_OK=1
+    fi
+elif [ -t 0 ]; then
+    if read -r -t "$PROMPT_TIMEOUT" ANSWER 2>/dev/null; then
+        READ_OK=1
+    elif read -r ANSWER 2>/dev/null; then
+        READ_OK=1
+    fi
+fi
+
+if [ "$READ_OK" -ne 1 ]; then
+    echo "[Code Review] Failed to read user input (waited ${PROMPT_TIMEOUT}s or non-interactive). Aborting commit."
+    exit 1
+fi
+
+if [ "$ANSWER" = "y" ] || [ "$ANSWER" = "Y" ]; then
+    printf '%b\n' "${GREEN}[Code Review] User confirmed. Continuing commit.${NC}"
+    if [ -n "$RECORD_ID" ]; then
+        curl -s -X PATCH "http://127.0.0.1:8787/record/${RECORD_ID}/confirm" >/dev/null 2>&1 || true
+    fi
+    exit 0
+else
+    printf '%b\n' "${RED}[Code Review] Commit aborted.${NC}"
+    exit 1
+fi

@@ -1,0 +1,23 @@
+#!/bin/sh
+# commit-msg - 提交说明确定后写入审查记录（pre-commit 时消息尚不可用）
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+RECORD_FILE="$REPO_ROOT/.git/ai-cr-record-id"
+[ -f "$RECORD_FILE" ] || exit 0
+
+RECORD_ID=$(cat "$RECORD_FILE" 2>/dev/null)
+[ -n "$RECORD_ID" ] || exit 0
+
+SYNC_SCRIPT="$REPO_ROOT/scripts/sync_commit_message.py"
+[ -f "$SYNC_SCRIPT" ] || exit 0
+
+PYTHON=""
+if command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+    PYTHON=python
+fi
+[ -n "$PYTHON" ] || exit 0
+
+"$PYTHON" "$SYNC_SCRIPT" --record-id "$RECORD_ID" --msg-file "$1" --repo-root "$REPO_ROOT" || true
+exit 0
