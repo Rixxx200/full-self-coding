@@ -11,6 +11,8 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 # AI 审查请求超时（秒）、用户确认等待时间（秒），可通过环境变量覆盖
 CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
 PROMPT_TIMEOUT="${CODE_REVIEW_PROMPT_TIMEOUT:-300}"
+CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.210.169:8788}"
+CODE_REVIEW_URL="${CODE_REVIEW_URL%/}"
 
 echo ""
 echo "[Code Review] Sending diff to local review service..."
@@ -46,7 +48,7 @@ echo "[Code Review] Changes: +${LINES_ADDED} -${LINES_DELETED} (${FILES_CHANGED}
 
 # 调用 /review：携带元数据 Header，Flask 审查后自动入库
 HDR_FILE=$(mktemp 2>/dev/null || echo "/tmp/ai_cr_hdr_$$")
-FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST http://127.0.0.1:8787/review \
+FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST "${CODE_REVIEW_URL}/review" \
     -H "Content-Type: text/plain" \
     -H "X-Author-Name: ${AUTHOR_NAME}" \
     -H "X-Author-Email: ${AUTHOR_EMAIL}" \
@@ -66,7 +68,7 @@ fi
 
 if [ $CURL_EXIT -ne 0 ]; then
     echo "[Code Review] Error calling local service (curl exit code: $CURL_EXIT)."
-    echo "Make sure the service is running at http://127.0.0.1:8787/review"
+    echo "Make sure the service is running at ${CODE_REVIEW_URL}/review"
     echo "Continuing commit without review."
     exit 0
 fi
@@ -115,7 +117,7 @@ fi
 if [ "$ANSWER" = "y" ] || [ "$ANSWER" = "Y" ]; then
     printf '%b\n' "${GREEN}[Code Review] User confirmed. Continuing commit.${NC}"
     if [ -n "$RECORD_ID" ]; then
-        curl -s -X PATCH "http://127.0.0.1:8787/record/${RECORD_ID}/confirm" >/dev/null 2>&1 || true
+        curl -s -X PATCH "${CODE_REVIEW_URL}/record/${RECORD_ID}/confirm" >/dev/null 2>&1 || true
     fi
     exit 0
 else
