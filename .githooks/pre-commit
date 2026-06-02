@@ -9,7 +9,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 
 # AI 审查请求超时（秒），可通过环境变量覆盖
 CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
-CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.210.169:8789}"
+CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.207.105:8789}"
 CODE_REVIEW_URL="${CODE_REVIEW_URL%/}"
 
 echo ""
