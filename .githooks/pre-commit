@@ -11,7 +11,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 # AI 审查请求超时（秒）、用户确认等待时间（秒），可通过环境变量覆盖
 CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
 PROMPT_TIMEOUT="${CODE_REVIEW_PROMPT_TIMEOUT:-300}"
-CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.207.105:8788}"
+CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.207.105:8789}"
 CODE_REVIEW_URL="${CODE_REVIEW_URL%/}"
 
 echo ""
@@ -63,8 +63,10 @@ FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST "${CODE_REV
 CURL_EXIT=$?
 
 RECORD_ID=""
+TOTAL_TOKENS=""
 if [ -f "$HDR_FILE" ]; then
     RECORD_ID=$(grep -i '^X-Record-Id:' "$HDR_FILE" | head -1 | sed 's/[^:]*:[[:space:]]*//' | tr -d '\r\n')
+    TOTAL_TOKENS=$(grep -i '^X-Total-Tokens:' "$HDR_FILE" | head -1 | sed 's/[^:]*:[[:space:]]*//' | tr -d '\r\n')
     rm -f "$HDR_FILE"
 fi
 
@@ -82,6 +84,9 @@ fi
 
 if [ -n "$RECORD_ID" ]; then
     echo "[Code Review] Saved to database (record id=${RECORD_ID})"
+    if [ -n "$TOTAL_TOKENS" ]; then
+        echo "[Code Review] Tokens used: ${TOTAL_TOKENS}"
+    fi
 fi
 
 echo ""
