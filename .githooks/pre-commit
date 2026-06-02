@@ -1,15 +1,17 @@
 #!/bin/sh
-# pre-commit - 提交时 AI 代码审查（不拦截提交）；reject 结果由服务端写入数据库
+# pre-commit - 使用本地 Flask 服务进行 AI 代码审查，审查时写入数据库
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 
-# AI 审查请求超时（秒），可通过环境变量覆盖
+# AI 审查请求超时（秒）、用户确认等待时间（秒），可通过环境变量覆盖
 CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
-CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.207.105:8789}"
+PROMPT_TIMEOUT="${CODE_REVIEW_PROMPT_TIMEOUT:-300}"
+CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.207.105:8788}"
 CODE_REVIEW_URL="${CODE_REVIEW_URL%/}"
 
 echo ""
@@ -46,7 +48,7 @@ echo "[Code Review] Author: ${AUTHOR_NAME} <${AUTHOR_EMAIL}>"
 echo "[Code Review] Review mode: ${COMMIT_TYPE} (all dimensions)"
 echo "[Code Review] Changes: +${LINES_ADDED} -${LINES_DELETED} (${FILES_CHANGED} file(s))"
 
-# 调用 /review：携带元数据 Header；仅 reject 时服务端入库
+# 调用 /review：携带元数据 Header，Flask 审查后自动入库
 HDR_FILE=$(mktemp 2>/dev/null || echo "/tmp/ai_cr_hdr_$$")
 FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST "${CODE_REVIEW_URL}/review" \
     -H "Content-Type: text/plain" \
@@ -79,9 +81,7 @@ if [ -z "$FEEDBACK" ]; then
 fi
 
 if [ -n "$RECORD_ID" ]; then
-    printf '%b\n' "${RED}[Code Review] Assessment: reject — saved to database (record id=${RECORD_ID})${NC}"
-else
-    printf '%b\n' "${GREEN}[Code Review] Assessment passed or warning — not saved to database.${NC}"
+    echo "[Code Review] Saved to database (record id=${RECORD_ID})"
 fi
 
 echo ""
@@ -89,5 +89,40 @@ echo "------------------- Code Review Report -------------------"
 echo "$FEEDBACK"
 echo "----------------------------------------------------------"
 echo ""
-printf '%b\n' "${GREEN}[Code Review] Review complete. Commit will proceed.${NC}"
-exit 0
+
+printf '%b\n' "${YELLOW}Do you want to continue with this commit? (y/N)${NC}"
+printf '[Code Review] Please respond within %s seconds.\n' "$PROMPT_TIMEOUT"
+
+ANSWER=""
+READ_OK=0
+
+# 优先从 /dev/tty 读取（Cursor/VS Code、Git GUI 下 stdin 常非终端）
+if [ -e /dev/tty ]; then
+    if read -r -t "$PROMPT_TIMEOUT" ANSWER < /dev/tty 2>/dev/null; then
+        READ_OK=1
+    elif read -r ANSWER < /dev/tty 2>/dev/null; then
+        READ_OK=1
+    fi
+elif [ -t 0 ]; then
+    if read -r -t "$PROMPT_TIMEOUT" ANSWER 2>/dev/null; then
+        READ_OK=1
+    elif read -r ANSWER 2>/dev/null; then
+        READ_OK=1
+    fi
+fi
+
+if [ "$READ_OK" -ne 1 ]; then
+    echo "[Code Review] Failed to read user input (waited ${PROMPT_TIMEOUT}s or non-interactive). Aborting commit."
+    exit 1
+fi
+
+if [ "$ANSWER" = "y" ] || [ "$ANSWER" = "Y" ]; then
+    printf '%b\n' "${GREEN}[Code Review] User confirmed. Continuing commit.${NC}"
+    if [ -n "$RECORD_ID" ]; then
+        curl -s -X PATCH "${CODE_REVIEW_URL}/record/${RECORD_ID}/confirm" >/dev/null 2>&1 || true
+    fi
+    exit 0
+else
+    printf '%b\n' "${RED}[Code Review] Commit aborted.${NC}"
+    exit 1
+fi
