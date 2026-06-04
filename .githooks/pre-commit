@@ -15,7 +15,7 @@ CODE_REVIEW_URL="${CODE_REVIEW_URL%/}"
 echo ""
 echo "[Code Review] Sending diff to local review service..."
 
-STAGED_DIFF=$(git diff --cached -- . ':(exclude)*.lock' ':(exclude)package*.json')
+STAGED_DIFF=$(git -c core.quotepath=false diff --cached -- . ':(exclude)*.lock' ':(exclude)package*.json')
 if [ -z "$STAGED_DIFF" ]; then
     echo "[Code Review] No staged changes, skipping."
     exit 0
