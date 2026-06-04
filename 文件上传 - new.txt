@@ -1,8 +1,7 @@
 @PostMapping("/upload")
 public String uploadFile(@RequestParam("file") MultipartFile file, HttpServletRequest request) {
-    // 漏洞点：没有校验文件后缀和Content-Type，直接保存
     String originalFilename = file.getOriginalFilename();
     String savePath = "/uploads/" + originalFilename; 
-    file.transferTo(new File(savePath)); // 直接保存，可上传JSP/PHP/EXE
+    file.transferTo(new File(savePath)); 
     return "上传成功";
 }
