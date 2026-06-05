@@ -21,6 +21,13 @@ if [ -z "$STAGED_DIFF" ]; then
     exit 0
 fi
 
+# 权威文件列表（UTF-8 Base64），避免 diff body 编码导致中文路径乱码
+CHANGED_FILES=$(git -c core.quotepath=false diff --cached --name-only -- . ':(exclude)*.lock' ':(exclude)package*.json')
+FILES_B64=""
+if [ -n "$CHANGED_FILES" ]; then
+    FILES_B64=$(printf '%s' "$CHANGED_FILES" | base64 -w 0 2>/dev/null || printf '%s' "$CHANGED_FILES" | base64 | tr -d '\n')
+fi
+
 # 收集元数据（由 flask_check /review 写入数据库）
 AUTHOR_NAME=$(git config user.name 2>/dev/null)
 AUTHOR_EMAIL=$(git config user.email 2>/dev/null)
@@ -49,7 +56,7 @@ echo "[Code Review] Changes: +${LINES_ADDED} -${LINES_DELETED} (${FILES_CHANGED}
 # 调用 /review：携带元数据 Header；仅 reject 时服务端入库
 HDR_FILE=$(mktemp 2>/dev/null || echo "/tmp/ai_cr_hdr_$$")
 FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST "${CODE_REVIEW_URL}/review" \
-    -H "Content-Type: text/plain" \
+    -H "Content-Type: text/plain; charset=utf-8" \
     -H "X-Author-Name: ${AUTHOR_NAME}" \
     -H "X-Author-Email: ${AUTHOR_EMAIL}" \
     -H "X-Review-Time: ${REVIEW_TIME}" \
@@ -57,6 +64,7 @@ FEEDBACK=$(curl -s -D "$HDR_FILE" --max-time "$CURL_TIMEOUT" -X POST "${CODE_REV
     -H "X-Lines-Deleted: ${LINES_DELETED}" \
     -H "X-Files-Changed: ${FILES_CHANGED}" \
     -H "X-Commit-Type: ${COMMIT_TYPE}" \
+    -H "X-Changed-Files-B64: ${FILES_B64}" \
     --data-binary "$STAGED_DIFF" 2>&1)
 CURL_EXIT=$?
 
