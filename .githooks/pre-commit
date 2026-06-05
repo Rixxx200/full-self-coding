@@ -9,7 +9,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 
 # AI 审查请求超时（秒），可通过环境变量覆盖
 CURL_TIMEOUT="${CODE_REVIEW_TIMEOUT:-120}"
-CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.210.169:8789}"
+CODE_REVIEW_URL="${CODE_REVIEW_URL:-http://192.168.210.169:8790}"
 CODE_REVIEW_URL="${CODE_REVIEW_URL%/}"
 
 echo ""
@@ -33,7 +33,7 @@ LINES_ADDED=0
 LINES_DELETED=0
 FILES_CHANGED=0
 STAT_FILE=$(mktemp 2>/dev/null || echo "/tmp/ai_cr_stat_$$")
-git diff --cached --numstat -- . ':(exclude)*.lock' ':(exclude)package*.json' > "$STAT_FILE"
+git -c core.quotepath=false diff --cached --numstat -- . ':(exclude)*.lock' ':(exclude)package*.json' > "$STAT_FILE"
 while read -r ADD DEL FILE; do
     [ -z "$ADD" ] && continue
     FILES_CHANGED=$((FILES_CHANGED + 1))
