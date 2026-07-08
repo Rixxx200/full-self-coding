@@ -1,4 +1,0 @@
-@GetMapping("/getOrder")
-public Order getOrder(@RequestParam String orderId, HttpSession session) {
-    return orderService.findById(orderId); 
-}

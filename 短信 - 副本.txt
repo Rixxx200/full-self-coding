@@ -1,5 +1,0 @@
-@app.route('/send_sms')
-def send_sms():
-    phone = request.args.get('phone')
-    send_code(phone) 
-    return "验证码已发送"

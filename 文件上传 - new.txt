@@ -1,7 +1,0 @@
-@PostMapping("/upload")
-public String uploadFile(@RequestParam("file") MultipartFile file, HttpServletRequest request) {
-    String originalFilename = file.getOriginalFilename();
-    String savePath = "/uploads/" + originalFilename; 
-    file.transferTo(new File(savePath)); 
-    return "上传成功";
-}
